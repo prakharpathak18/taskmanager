@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Simple Kanban Board</title>
+
+<style>
+    body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: #f0f0f0;
+    }
+
+    /* Toolbar */
+    .toolbar {
+        height: 60px;
+        background: #333;
+        color: white;
+        display: flex;
+        align-items: center;
+        padding: 0 15px;
+        gap: 10px;
+    }
+    .color-btn {
+        width: 25px;
+        height: 25px;
+        border-radius: 4px;
+        cursor: pointer;
+        border: 2px solid white;
+    }
+    #addColumnBtn, #deleteModeBtn {
+        background: #555;
+        padding: 6px 10px;
+        border-radius: 4px;
+        cursor: pointer;
+        color: white;
+    }
+    #deleteModeBtn.active {
+        background: red;
+    }
+
+    /* Board Layout */
+    .board {
+        display: flex;
+        gap: 15px;
+        padding: 15px;
+        justify-content: space-evenly;
+        overflow-x: auto;
+    }
+
+    /* Columns */
+    .column {
+        flex: 1 1 260px;
+        max-width: 280px;
+        background: #ddd;
+        padding: 10px;
+        border-radius: 6px;
+        display: flex;
+        flex-direction: column;
+    }
+    .column h2 {
+        margin: 0 0 8px;
+        font-size: 18px;
+    }
+
+    .delete-column {
+        font-size: 14px;
+        cursor: pointer;
+        color: red;
+        margin-bottom: 10px;
+    }
+
+    /* Tasks */
+    .task {
+        background: white;
+        padding: 8px;
+        border-radius: 6px;
+        margin-bottom: 10px;
+        border-left: 6px solid #666;
+        cursor: grab;
+    }
+
+    .task-header {
+        font-weight: bold;
+        margin-bottom: 5px;
+    }
+
+    .basic-desc {
+        background: #f7f7f7;
+        padding: 5px;
+        border-radius: 4px;
+        margin-bottom: 5px;
+    }
+
+    .date-box {
+        margin: 5px 0;
+        font-size: 14px;
+    }
+    .date-box input {
+        width: 100%;
+        padding: 4px;
+    }
+
+    .info-btn {
+        cursor: pointer;
+        float: right;
+        font-size: 14px;
+        color: #444;
+    }
+
+    .extra-details {
+        display: none;
+        background: #eee;
+        padding: 6px;
+        border-radius: 4px;
+        margin-top: 6px;
+    }
+
+    .progress-box {
+        margin-top: 8px;
+    }
+    .progress-box input {
+        width: 100%;
+    }
+</style>
+</head>
+
+<body>
+
+<div class="toolbar">
+    <div class="color-btn" data-color="lightpink" style="background:lightpink;"></div>
+    <div class="color-btn" data-color="lightgreen" style="background:lightgreen;"></div>
+    <div class="color-btn" data-color="lightblue" style="background:lightblue;"></div>
+    <div class="color-btn" data-color="black" style="background:black;"></div>
+
+    <div id="addColumnBtn">+ Column</div>
+    <div id="deleteModeBtn">Delete</div>
+</div>
+
+<div class="board" id="board"></div>
+
+<script>
+let selectedColor = "lightpink";
+let deleteMode = false;
+let dragTask = null;
+
+/* -------------------------------
+   COLOR PICK
+-------------------------------- */
+document.querySelectorAll(".color-btn").forEach(btn => {
+    btn.addEventListener("click", function () {
+        selectedColor = this.dataset.color;
+    });
+});
+
+/* -------------------------------
+   DELETE MODE
+-------------------------------- */
+document.getElementById("deleteModeBtn").addEventListener("click", function () {
+    deleteMode = !deleteMode;
+    this.classList.toggle("active");
+});
+
+/* -------------------------------
+   SAVE BOARD
+-------------------------------- */
+function saveBoard() {
+    let data = { columns: [], tasks: [] };
+
+    document.querySelectorAll(".column").forEach(col => {
+        let colId = col.dataset.id;
+
+        data.columns.push({
+            id: colId,
+            title: col.querySelector("h2").textContent
+        });
+
+        col.querySelectorAll(".task").forEach(task => {
+            data.tasks.push({
+                id: task.dataset.id,
+                column: colId,
+                color: task.dataset.color,
+                title: task.querySelector(".task-header").textContent,
+                basic: task.querySelector(".basic-desc").textContent,
+                start: task.querySelector(".start-date-text").textContent,
+                end: task.querySelector(".end-date").value,
+                extra: task.querySelector(".extra-details").textContent,
+                progress: task.querySelector(".progress").value
+            });
+        });
+    });
+
+    localStorage.setItem("kanbanSimple", JSON.stringify(data));
+}
+
+/* -------------------------------
+   LOAD BOARD
+-------------------------------- */
+function loadBoard() {
+    const saved = JSON.parse(localStorage.getItem("kanbanSimple") || "null");
+
+    if (!saved) {
+        createColumn("To Do");
+        createColumn("In Progress");
+        createColumn("Done");
+        return;
+    }
+
+    saved.columns.forEach(c => createColumn(c.title, c.id));
+    saved.tasks.forEach(t => addTaskToColumn(t));
+}
+
+/* -------------------------------
+   ADD COLUMN
+-------------------------------- */
+document.getElementById("addColumnBtn").addEventListener("click", function () {
+    let name = prompt("Column name:");
+    if (name) createColumn(name);
+});
+
+function createColumn(name, forcedId = null) {
+    const board = document.getElementById("board");
+    let id = forcedId || Math.random().toString(36).substr(2, 9);
+
+    let col = document.createElement("div");
+    col.className = "column";
+    col.dataset.id = id;
+
+    col.innerHTML = `
+        <h2 contenteditable="true">${name}</h2>
+        <div class="delete-column">Delete Column</div>
+        <div class="tasks"></div>
+        <div class="add-task">+ Add Task</div>
+    `;
+
+    col.querySelector(".delete-column").addEventListener("click", function () {
+        if (confirm("Delete this column?")) {
+            col.remove();
+            saveBoard();
+        }
+    });
+
+    col.querySelector(".add-task").addEventListener("click", function () {
+        let now = new Date();
+
+        let newTask = {
+            id: Math.random().toString(36).substr(2, 9),
+            column: id,
+            color: selectedColor,
+            title: "New Task",
+            basic: "Basic description...",
+            extra: "Extra details...",
+            start: now.toLocaleString(),  // REAL-TIME, UNEDITABLE
+            end: "",
+            progress: 0
+        };
+
+        addTaskToColumn(newTask);
+        saveBoard();
+    });
+
+    col.addEventListener("dragover", function (e) { e.preventDefault(); });
+    col.addEventListener("drop", function () {
+        if (dragTask) {
+            col.querySelector(".tasks").appendChild(dragTask);
+            saveBoard();
+        }
+    });
+
+    board.appendChild(col);
+}
+
+/* -------------------------------
+   ADD TASK TO COLUMN
+-------------------------------- */
+function addTaskToColumn(t) {
+    const container = document.querySelector(`.column[data-id="${t.column}"] .tasks`);
+
+    let task = document.createElement("div");
+    task.className = "task";
+    task.dataset.id = t.id;
+    task.dataset.color = t.color;
+    task.style.borderLeftColor = t.color;
+    task.draggable = true;
+
+    task.innerHTML = `
+        <div class="task-header" contenteditable="true">
+            ${t.title}
+            <span class="info-btn">ℹ️</span>
+        </div>
+
+        <div class="basic-desc" contenteditable="true">${t.basic}</div>
+
+        <div class="date-box">
+            <strong>Start:</strong>
+            <div class="start-date-text">${t.start}</div>
+        </div>
+
+        <div class="date-box">
+            <strong>End:</strong>
+            <input type="date" class="end-date" value="${t.end || ""}">
+        </div>
+
+        <div class="extra-details" contenteditable="true">${t.extra}</div>
+
+        <div class="progress-box">
+            Progress:
+            <input class="progress" type="range" min="0" max="100" value="${t.progress}">
+        </div>
+    `;
+
+    /* Toggle extra details */
+    task.querySelector(".info-btn").addEventListener("click", function (e) {
+        e.stopPropagation();
+        let extra = task.querySelector(".extra-details");
+        extra.style.display = extra.style.display === "block" ? "none" : "block";
+        saveBoard();
+    });
+
+    /* End date update */
+    task.querySelector(".end-date").addEventListener("input", saveBoard);
+
+    /* Progress update */
+    task.querySelector(".progress").addEventListener("input", saveBoard);
+
+    /* Delete mode */
+    task.addEventListener("click", function () {
+        if (deleteMode) {
+            task.remove();
+            saveBoard();
+        }
+    });
+
+    /* Dragging */
+    task.addEventListener("dragstart", function () {
+        dragTask = task;
+    });
+    task.addEventListener("dragend", function () {
+        dragTask = null;
+        saveBoard();
+    });
+
+    container.appendChild(task);
+}
+
+/* INIT */
+loadBoard();
+</script>
+
+</body>
+</html>
